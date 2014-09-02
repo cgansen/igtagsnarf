@@ -40,7 +40,7 @@ func main() {
 func snarf(tag, clientID string) error {
 	url := fmt.Sprintf("https://api.instagram.com/v1/tags/%s/media/recent?client_id=%s", tag, clientID)
 
-        fmt.Println("GET %s", url)
+	fmt.Println("GET %s", url)
 	resp, err := http.Get(url)
 	if err != nil {
 		fmt.Println("error fetching list from instagram: ", err)
@@ -54,24 +54,43 @@ func snarf(tag, clientID string) error {
 		return err
 	}
 
-        s := struct {
-                Assets []Asset `json:"data"`
-        }{}
+	s := struct {
+		Assets []Asset `json:"data"`
+	}{}
 
 	if err := json.Unmarshal(body, &s); err != nil {
 		fmt.Println("error unmarshaling response json:", err)
-                fmt.Printf("%s", string(body))
+		fmt.Printf("%s", string(body))
 		return err
 	}
 
-	for i, a := range s.Assets {
-		fmt.Printf("%d. %v\n", i, a)
-	}
+	download(s.Assets[0], "files")
 
 	return nil
 }
 
 // trigger a download of an asset
-func download(a *Asset) error {
+func download(a Asset, out string) error {
+	path := fmt.Sprintf("./%s/%s-%s.jpg", out, a.User.Username, a.ID)
+
+	imgUrl := a.Images["standard_resolution"].URL
+	resp, err := http.Get(imgUrl)
+	if err != nil {
+		fmt.Println("error: fetch img failed:", err)
+		return err
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	defer resp.Body.Close()
+	if err != nil {
+		fmt.Println("error: read response failed:", err)
+		return err
+	}
+
+	if err := ioutil.WriteFile(path, body, 0644); err != nil {
+		fmt.Println("error: could not write file:", err)
+		return err
+	}
+
 	return nil
 }
