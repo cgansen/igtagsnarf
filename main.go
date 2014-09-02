@@ -30,17 +30,19 @@ func main() {
 
 	app.Action = func(c *cli.Context) {
 		tag, clientID := c.String("tag"), c.String("client")
-		snarf(tag, clientID)
+		snarf(tag, clientID, "")
 	}
 
 	app.Run(os.Args)
 }
 
 // download a list of items that match a tag
-func snarf(tag, clientID string) error {
-	url := fmt.Sprintf("https://api.instagram.com/v1/tags/%s/media/recent?count=500&client_id=%s", tag, clientID)
+func snarf(tag, clientID, url string) error {
+	if url == "" {
+		url = fmt.Sprintf("https://api.instagram.com/v1/tags/%s/media/recent?count=500&client_id=%s", tag, clientID)
+	}
 
-	fmt.Println("GET %s", url)
+	fmt.Println("GET ", url)
 	resp, err := http.Get(url)
 	if err != nil {
 		fmt.Println("error fetching list from instagram: ", err)
@@ -55,7 +57,8 @@ func snarf(tag, clientID string) error {
 	}
 
 	s := struct {
-		Assets []Asset `json:"data"`
+		Assets     []Asset           `json:"data"`
+		Pagination map[string]string `json:"pagination"`
 	}{}
 
 	if err := json.Unmarshal(body, &s); err != nil {
@@ -64,12 +67,19 @@ func snarf(tag, clientID string) error {
 		return err
 	}
 
+	// prep the output directory
+	path := fmt.Sprintf("./files/%s/", tag)
+	if err := os.MkdirAll(path, 0755); err != nil {
+		fmt.Println("error: could not create output directory:", err)
+		return err
+	}
+
 	work := make(chan Asset, len(s.Assets))
 	done := make(chan error, 5)
 
 	// launch five downloaders
 	for i := 0; i < 5; i++ {
-		go download(work, done, "files")
+		go download(work, done, path)
 	}
 
 	// send items to workers
@@ -85,13 +95,18 @@ func snarf(tag, clientID string) error {
 		}
 	}
 
+	// do it all over again if there's more!
+	if s.Pagination["next_url"] != "" {
+		snarf(tag, clientID, s.Pagination["next_url"])
+	}
+
 	return nil
 }
 
 // trigger a download of an asset
 func download(assets <-chan Asset, done chan<- error, out string) error {
 	for a := range assets {
-		path := fmt.Sprintf("./%s/%s-%s.jpg", out, a.User.Username, a.ID)
+		path := fmt.Sprintf("%s/%s-%s.jpg", out, a.User.Username, a.ID)
 
 		imgUrl := a.Images["standard_resolution"].URL
 		fmt.Println("downloading", imgUrl)
